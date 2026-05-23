@@ -2,6 +2,7 @@ import { toDisplayStatementKind } from "../../domain/statementKinds";
 import type { StatementKind } from "../../domain/models";
 import {
   DATE_ROW_PATTERN,
+  DERIVATIVE_DETAIL_ROW_START_PATTERN,
   DEFAULT_SETTLEMENT_CLOSE_TIME,
   DERIVATIVE_COLUMN_STARTS,
   DERIVATIVE_ROW_START_PATTERN,
@@ -126,6 +127,19 @@ function collectRowBlocks(
     }
 
     if (rowStartPattern.test(text)) {
+      const currentStartText = currentBlock[0]
+        ? normalizeCell(currentBlock[0].text)
+        : "";
+      const continuesLegacyDerivativeBlock =
+        currentBlock.length > 0 &&
+        DERIVATIVE_DETAIL_ROW_START_PATTERN.test(currentStartText) &&
+        DERIVATIVE_ROW_START_PATTERN.test(text);
+
+      if (continuesLegacyDerivativeBlock) {
+        currentBlock.push(line);
+        continue;
+      }
+
       if (currentBlock.length > 0) {
         blocks.push(currentBlock);
       }
@@ -196,30 +210,131 @@ function parseDerivativeBlock(
   const fields = assignItemsToColumns(block, DERIVATIVE_COLUMN_STARTS);
   const securityValue = cleanSecurity(fields.security);
 
-  if (!fields.contractNumber || !securityValue || !SECURITY_PATTERN.test(securityValue)) {
+  if (
+    fields.contractNumber &&
+    securityValue &&
+    SECURITY_PATTERN.test(securityValue)
+  ) {
+    const brokerage = toDecimal(fields.brokerage);
+    const gst = toDecimal(fields.gst);
+    const totalValue = toDecimal(fields.totalValue);
+    const netAmount = toDecimal(fields.netAmount);
+    const side = fields.side as "B" | "S";
+
+    return {
+      sequence,
+      sourcePdf,
+      statementKind,
+      contractNumber: fields.contractNumber,
+      exchangeCode: fields.exchangeCode,
+      orderNo: fields.orderNo,
+      orderTime: parsePdfDateTime(fields.orderTime),
+      tradeNo: fields.tradeNo,
+      tradeTime: parsePdfDateTime(fields.tradeTime),
+      security: parseSecurity(fields.security),
+      side,
+      quantity: Number.parseInt(fields.quantity, 10),
+      grossRate: toDecimal(fields.grossRate),
+      totalValue,
+      brokerage,
+      gst,
+      netAmount,
+      rowStt: deriveRowStt(side, totalValue, brokerage, gst, netAmount),
+    };
+  }
+
+  return parseDerivativeBlockByAnchors(block, sequence, sourcePdf, statementKind);
+}
+
+function parseDerivativeBlockByAnchors(
+  block: PdfLayoutLine[],
+  sequence: number,
+  sourcePdf: string,
+  statementKind: StatementKind,
+): ExecutionRow | null {
+  const items = [...block]
+    .sort((left, right) => right.y - left.y)
+    .flatMap((line) =>
+      [...line.items].sort((left, right) => left.x - right.x).map((item) => ({
+        ...item,
+        text: normalizeCell(item.text),
+      })),
+    )
+    .filter((item) => item.text);
+
+  const pick = (predicate: (item: PdfLayoutItem) => boolean) => items.find(predicate)?.text ?? "";
+  const pickRange = (minX: number, maxX: number, predicate?: (item: PdfLayoutItem) => boolean) =>
+    items.find((item) => item.x >= minX && item.x < maxX && (predicate ? predicate(item) : true))?.text ?? "";
+  const pickAllRange = (minX: number, maxX: number, predicate?: (item: PdfLayoutItem) => boolean) =>
+    items
+      .filter((item) => item.x >= minX && item.x < maxX && (predicate ? predicate(item) : true))
+      .sort((left, right) => right.y - left.y || left.x - right.x)
+      .map((item) => item.text);
+
+  const contractNumber = pick((item) => DERIVATIVE_ROW_START_PATTERN.test(item.text));
+  const exchangeCode = pickRange(90, 150, (item) => /^[A-Z]{3}$/.test(item.text));
+  const orderNo = pickRange(135, 235, (item) => /^\d{8,}$/.test(item.text));
+  const tradeNo = pickRange(255, 330, (item) => /^\d{5,}$/.test(item.text));
+  const dateTokens = items
+    .filter((item) => DATE_ROW_PATTERN.test(item.text) && item.x < 370)
+    .sort((left, right) => left.x - right.x || right.y - left.y)
+    .map((item) => item.text);
+  const timeTokens = items
+    .filter((item) => /^\d{2}:\d{2}:\d{2}$/.test(item.text) && item.x < 380)
+    .sort((left, right) => left.x - right.x || right.y - left.y)
+    .map((item) => item.text);
+  const securityParts = [
+    ...pickAllRange(360, 500, (item) => /[A-Z@-]/.test(item.text)),
+    ...pickAllRange(410, 470, (item) => /^\d+(?:\.\d+)?$/.test(item.text)),
+  ];
+  const security = cleanSecurity(securityParts.join(" "));
+  const side = pickRange(500, 530, (item) => /^(B|S)$/.test(item.text)) as "B" | "S";
+  const quantity = pickRange(530, 565, (item) => /^\d+$/.test(item.text));
+  const grossRate = pickRange(585, 635, (item) => /^\d+(?:\.\d+)?$/.test(item.text));
+  const totalValueText = pickRange(640, 690, (item) => /^\d+(?:\.\d+)?$/.test(item.text));
+  const brokerageText = pickRange(700, 740, (item) => /^\d+(?:\.\d+)?$/.test(item.text));
+  const gstText = pickRange(750, 790, (item) => /^\d+(?:\.\d+)?$/.test(item.text));
+  const netAmountText = pickRange(800, 860, (item) => /^\d+(?:\.\d+)?$/.test(item.text));
+
+  if (
+    !contractNumber ||
+    !exchangeCode ||
+    !orderNo ||
+    !tradeNo ||
+    dateTokens.length < 2 ||
+    timeTokens.length < 2 ||
+    !security ||
+    !SECURITY_PATTERN.test(security) ||
+    !side ||
+    !quantity ||
+    !grossRate ||
+    !totalValueText ||
+    !brokerageText ||
+    !gstText ||
+    !netAmountText
+  ) {
     return null;
   }
 
-  const brokerage = toDecimal(fields.brokerage);
-  const gst = toDecimal(fields.gst);
-  const totalValue = toDecimal(fields.totalValue);
-  const netAmount = toDecimal(fields.netAmount);
-  const side = fields.side as "B" | "S";
+  const totalValue = toDecimal(totalValueText);
+  const brokerage = toDecimal(brokerageText);
+  const gst = toDecimal(gstText);
+  const netAmount = toDecimal(netAmountText);
 
   return {
     sequence,
     sourcePdf,
     statementKind,
-    contractNumber: fields.contractNumber,
-    exchangeCode: fields.exchangeCode,
-    orderNo: fields.orderNo,
-    orderTime: parsePdfDateTime(fields.orderTime),
-    tradeNo: fields.tradeNo,
-    tradeTime: parsePdfDateTime(fields.tradeTime),
-    security: parseSecurity(fields.security),
+    contractNumber,
+    exchangeCode,
+    orderNo,
+    orderTime: parsePdfDateTime(`${dateTokens[0]} ${timeTokens[0]}`),
+    tradeNo,
+    tradeTime: parsePdfDateTime(`${dateTokens[1]} ${timeTokens[1]}`),
+    security: parseSecurity(security),
     side,
-    quantity: Number.parseInt(fields.quantity, 10),
-    grossRate: toDecimal(fields.grossRate),
+    quantity: Number.parseInt(quantity, 10),
+    grossRate: toDecimal(grossRate),
     totalValue,
     brokerage,
     gst,
@@ -375,9 +490,12 @@ export function parseStatementLayout(
   let sequence = 1;
 
   for (const page of layout.pages) {
+    const derivativeRowStartPattern = new RegExp(
+      `${DERIVATIVE_ROW_START_PATTERN.source}|${DERIVATIVE_DETAIL_ROW_START_PATTERN.source}`,
+    );
     const blocks = collectRowBlocks(
       page.lines,
-      statementKind === "EQUITY" ? EQUITY_ROW_START_PATTERN : DERIVATIVE_ROW_START_PATTERN,
+      statementKind === "EQUITY" ? EQUITY_ROW_START_PATTERN : derivativeRowStartPattern,
     );
 
     for (const block of blocks) {

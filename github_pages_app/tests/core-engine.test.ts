@@ -140,6 +140,69 @@ function equityLayout(): PdfDocumentLayout {
   };
 }
 
+function legacyMcxLayout(): PdfDocumentLayout {
+  const page1Lines = [
+    line(940, [{ text: "Commodity Derivatives Transaction Statement from 01-Jan-2026 to 31-Mar-2026", x: 206 }]),
+    line(803, [
+      { text: "23-03-2026", x: 223 },
+      { text: "260066640", x: 266 },
+      { text: "23-03-2026", x: 312 },
+      { text: "NATGASMINI-OPTFUT-23APR2026-CE-", x: 364 },
+    ]),
+    line(799, [
+      { text: "MCO/2026/1745585", x: 18 },
+      { text: "MCO", x: 103 },
+      { text: "608226324160533", x: 143 },
+      { text: "S", x: 514 },
+      { text: "250", x: 537 },
+      { text: "22.00", x: 597 },
+      { text: "80500.00", x: 652 },
+      { text: "20.00", x: 710 },
+      { text: "4.02", x: 758 },
+      { text: "80475.98", x: 820 },
+    ]),
+    line(795, [
+      { text: "09:55:19", x: 229 },
+      { text: "09:55:19", x: 318 },
+      { text: "300.00", x: 419 },
+    ]),
+    line(782, [
+      { text: "23-03-2026", x: 223 },
+      { text: "260066812", x: 266 },
+      { text: "23-03-2026", x: 312 },
+      { text: "NATGASMINI-OPTFUT-23APR2026-CE-", x: 364 },
+    ]),
+    line(778, [
+      { text: "MCO/2026/1745585", x: 18 },
+      { text: "MCO", x: 103 },
+      { text: "608226324160533", x: 143 },
+      { text: "S", x: 514 },
+      { text: "250", x: 537 },
+      { text: "22.00", x: 597 },
+      { text: "80500.00", x: 652 },
+      { text: "0.00", x: 714 },
+      { text: "0.42", x: 758 },
+      { text: "80499.58", x: 820 },
+    ]),
+    line(774, [
+      { text: "09:55:40", x: 229 },
+      { text: "09:55:40", x: 318 },
+      { text: "300.00", x: 419 },
+    ]),
+  ];
+  const summaryPage = [
+    line(120, [{ text: "Summary", x: 20 }]),
+    line(100, [{ text: "Total 169125.00 161000.00 15.00 14.44 0.12 0.03", x: 20 }]),
+  ];
+
+  return {
+    pageCount: 1,
+    firstPageText: page1Lines.map((entry) => entry.text).join("\n"),
+    scannedText: [...page1Lines, ...summaryPage].map((entry) => entry.text).join("\n"),
+    pages: [{ pageNumber: 1, lines: [...page1Lines, ...summaryPage], text: [...page1Lines, ...summaryPage].map((entry) => entry.text).join("\n") }],
+  };
+}
+
 describe("core engine", () => {
   it("parses derivative option contracts", () => {
     const security = parseSecurity("@HDFCBANK-OPTSTK-30MAR2026-PE-870.00");
@@ -158,6 +221,16 @@ describe("core engine", () => {
     expect(statement.rows[0].rowStt.toFixed(2)).toBe("2.00");
     expect(statement.summary.totalBuyValue.toFixed(2)).toBe("483175.00");
     expect(statement.summary.totalSellValue.toFixed(2)).toBe("480837.50");
+  });
+
+  it("parses legacy MCX layouts with date-led prelude lines", () => {
+    const statement = parseStatementLayout(legacyMcxLayout(), "TRX-MCX.pdf");
+    expect(statement.statementKind).toBe("MCX");
+    expect(statement.rows).toHaveLength(2);
+    expect(statement.rows[0].contractNumber).toBe("MCO/2026/1745585");
+    expect(statement.rows[0].tradeNo).toBe("260066640");
+    expect(statement.rows[0].security.raw).toBe("NATGASMINI-OPTFUT-23APR2026-CE-300.00");
+    expect(statement.rows[1].brokerage.toFixed(2)).toBe("0.00");
   });
 
   it("parses equity statements from browser layout blocks", () => {

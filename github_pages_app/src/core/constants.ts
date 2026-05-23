@@ -6,6 +6,8 @@ export const SECURITY_PATTERN =
 
 export const DATE_ROW_PATTERN = /^\d{2}-\d{2}-\d{4}$/;
 export const DERIVATIVE_ROW_START_PATTERN = /^(?:ISEC|MCO)\/\d+(?:\d+)?\/\d+/;
+export const DERIVATIVE_DETAIL_ROW_START_PATTERN =
+  /^\d{2}-\d{2}-\d{4}\s+\d+\s+\d{2}-\d{2}-\d{4}\s+[A-Z0-9@-]+/;
 export const EQUITY_ROW_START_PATTERN = /^ISEC\/\d+(?:\d+)?\/\d+/;
 export const FOOTER_LINE_PATTERN =
   /^(?:Page \d+ of \d+|Place\b|Date\b|For ICICI Securities Limited\.|This is a computer generated statement|Please note that this statement does not contain)/i;
