@@ -1,0 +1,4 @@
+.DS_Store
+github_pages_app/node_modules/
+github_pages_app/dist/
+github_pages_app/*.tsbuildinfo
