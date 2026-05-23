@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import {
   DEFAULT_DOWNLOAD_OPTIONS,
   EMPTY_RESULT_METRICS,
-  PREPARATION_PROGRESS_STEPS,
 } from "../config/outputContract";
 import type {
   ResultMetrics,
@@ -12,6 +11,8 @@ import type {
   WorkbookDownloadOptions,
 } from "../domain/models";
 import { createStableFileId } from "../utils/formatters";
+import type { ProcessedWorkbookData } from "../core/models";
+import type { WorkbookDataPayload } from "../core/reporting";
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
@@ -39,6 +40,8 @@ export function useMvpWorkspace() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [warnings, setWarnings] = useState<WarningItem[]>([]);
   const [results, setResults] = useState<ResultMetrics | null>(null);
+  const [processedData, setProcessedData] = useState<ProcessedWorkbookData | null>(null);
+  const [workbookPayload, setWorkbookPayload] = useState<WorkbookDataPayload | null>(null);
 
   const supportedFiles = useMemo(
     () => uploadedFiles.filter((file) => file.status === "ready" && file.detection?.supported),
@@ -69,6 +72,8 @@ export function useMvpWorkspace() {
     }));
 
     setResults(null);
+    setProcessedData(null);
+    setWorkbookPayload(null);
     setStatusText("Reading PDF titles and classifying statement types...");
     setProgressPercent(5);
     setUploadedFiles((previous) => dedupeUploads(previous, nextEntries));
@@ -135,6 +140,8 @@ export function useMvpWorkspace() {
     setUploadedFiles((previous) => previous.filter((file) => file.id !== id));
     setWarnings((previous) => previous.filter((warning) => !warning.id.includes(id)));
     setResults(null);
+    setProcessedData(null);
+    setWorkbookPayload(null);
   }
 
   function updateOption<K extends keyof WorkbookDownloadOptions>(
@@ -148,32 +155,110 @@ export function useMvpWorkspace() {
     setIsGenerating(true);
     setProgressPercent(0);
     setResults(null);
-    setStatusText("Preparing browser-side parsing pipeline...");
+    setProcessedData(null);
+    setWorkbookPayload(null);
 
-    // This preview runner is intentionally lightweight until the full parser port lands.
-    setWarnings((previous) => [
-      createWarning(
-        "info",
-        "Task 3 foundation is in place",
-        "This frontend slice includes real upload intake and statement detection. Full trade parsing, workbook generation, and downloads are the next implementation slices.",
-      ),
-      ...previous,
-    ]);
+    try {
+      setStatusText("Loading full PDF layouts...");
+      setProgressPercent(10);
+      const [{ processUploadedStatements }, reporting] = await Promise.all([
+        import("../core/processStatements"),
+        import("../core/reporting"),
+      ]);
+      const processed = await processUploadedStatements(uploadedFiles);
 
-    for (const step of PREPARATION_PROGRESS_STEPS) {
-      await new Promise((resolve) => window.setTimeout(resolve, 280));
-      setProgressPercent(step.percent);
-      setStatusText(step.text);
+      setStatusText("Reconstructing trades and allocating statement costs...");
+      setProgressPercent(70);
+      const payload = reporting.buildWorkbookPayload(
+        processed.statements,
+        processed.rows,
+        processed.trades,
+        processed.openPositions,
+        processed.sourceManifest,
+        processed.summary,
+        processed.statementPeriod,
+      );
+
+      setProcessedData(processed);
+      setWorkbookPayload(payload);
+      setResults(reporting.metricsFromWorkbookPayload(payload));
+      setProgressPercent(100);
+      setStatusText("Report generation complete. Downloads are ready.");
+
+      const nextWarnings: WarningItem[] = [];
+      if (processed.openPositions.length > 0) {
+        nextWarnings.push(
+          createWarning(
+            "warning",
+            "Unresolved open positions remain",
+            `${processed.openPositions.length} positions could not be fully realized from the uploaded statements alone.`,
+            "open-positions-warning",
+          ),
+        );
+      }
+      if (processed.sourceManifest.duplicatesIgnored.length > 0) {
+        nextWarnings.push(
+          createWarning(
+            "info",
+            "Duplicate statements were ignored",
+            `${processed.sourceManifest.duplicatesIgnored.length} duplicate statements matched an existing execution signature and were skipped.`,
+            "duplicate-statements-info",
+          ),
+        );
+      }
+      setWarnings((previous) => [
+        ...nextWarnings,
+        ...previous.filter(
+          (warning) =>
+            warning.id !== "open-positions-warning" &&
+            warning.id !== "duplicate-statements-info",
+        ),
+      ]);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown processing error";
+      setStatusText("Generation failed.");
+      setProgressPercent(0);
+      setWarnings((previous) => [
+        createWarning("error", "Report generation failed", message, "generation-failed"),
+        ...previous.filter((warning) => warning.id !== "generation-failed"),
+      ]);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function downloadExcel() {
+    if (!processedData || !workbookPayload) {
+      return;
     }
 
-    setResults({
-      executionRows: supportedFiles.length,
-      closedTrades: 0,
-      unresolvedPositions: uploadedFiles.filter((file) => file.status === "error").length,
-      grossPnl: 0,
-      netPnl: 0,
+    const [{ buildDownloadBundle }, { triggerBrowserDownload }] = await Promise.all([
+      import("../core/export/bundle"),
+      import("../core/export/downloads"),
+    ]);
+    const artifact = await buildDownloadBundle(processedData, workbookPayload, {
+      ...options,
+      includeExcel: true,
+      downloadMode: "excel",
     });
-    setIsGenerating(false);
+    triggerBrowserDownload(artifact.blob, artifact.filename);
+  }
+
+  async function downloadBundle() {
+    if (!processedData || !workbookPayload) {
+      return;
+    }
+
+    const [{ buildDownloadBundle }, { triggerBrowserDownload }] = await Promise.all([
+      import("../core/export/bundle"),
+      import("../core/export/downloads"),
+    ]);
+    const artifact = await buildDownloadBundle(processedData, workbookPayload, {
+      ...options,
+      downloadMode: "zip",
+    });
+    triggerBrowserDownload(artifact.blob, artifact.filename);
   }
 
   return {
@@ -186,9 +271,12 @@ export function useMvpWorkspace() {
     results: results ?? EMPTY_RESULT_METRICS,
     supportedFiles,
     canGenerate,
+    hasDownloads: processedData !== null && workbookPayload !== null,
     analyzeFiles,
     removeFile,
     updateOption,
     generatePreview,
+    downloadExcel,
+    downloadBundle,
   };
 }

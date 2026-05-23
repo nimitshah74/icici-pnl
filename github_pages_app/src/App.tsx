@@ -18,10 +18,13 @@ function App() {
     warnings,
     results,
     canGenerate,
+    hasDownloads,
     analyzeFiles,
     removeFile,
     updateOption,
     generatePreview,
+    downloadExcel,
+    downloadBundle,
   } = useMvpWorkspace();
 
   return (
@@ -54,7 +57,12 @@ function App() {
           statusText={statusText}
           progressPercent={progressPercent}
         />
-        <ResultsPanel results={results} />
+        <ResultsPanel
+          results={results}
+          hasDownloads={hasDownloads}
+          onDownloadExcel={downloadExcel}
+          onDownloadBundle={downloadBundle}
+        />
         <WarningsPanel warnings={warnings} />
       </main>
     </div>

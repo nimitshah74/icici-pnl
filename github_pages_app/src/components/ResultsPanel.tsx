@@ -3,9 +3,17 @@ import { formatCurrency } from "../utils/formatters";
 
 interface ResultsPanelProps {
   results: ResultMetrics;
+  hasDownloads: boolean;
+  onDownloadExcel: () => Promise<void>;
+  onDownloadBundle: () => Promise<void>;
 }
 
-export function ResultsPanel({ results }: ResultsPanelProps) {
+export function ResultsPanel({
+  results,
+  hasDownloads,
+  onDownloadExcel,
+  onDownloadBundle,
+}: ResultsPanelProps) {
   return (
     <>
       <section className="results-grid">
@@ -34,13 +42,23 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
       <section className="download-card">
         <div>
           <h2>Results</h2>
-          <p>Download actions will be enabled when the browser parser and export pipeline lands in the next slices.</p>
+          <p>Download the Excel workbook directly, or export the full audit bundle with CSV and metadata files.</p>
         </div>
         <div className="button-row">
-          <button type="button" className="secondary-button" disabled>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!hasDownloads}
+            onClick={() => void onDownloadExcel()}
+          >
             Download Excel
           </button>
-          <button type="button" className="secondary-button" disabled>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!hasDownloads}
+            onClick={() => void onDownloadBundle()}
+          >
             Download Full Bundle
           </button>
         </div>

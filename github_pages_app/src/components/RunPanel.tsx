@@ -9,7 +9,7 @@ export function RunPanel({ canGenerate, isGenerating, onGenerate }: RunPanelProp
     <section className="run-card">
       <div>
         <h2>3. Processor Command Center</h2>
-        <p>Current slice: upload intake, content-based type detection, and frontend contract wiring.</p>
+        <p>Run the browser-side parser, reconstruct trades, and prepare downloadable report artifacts locally.</p>
       </div>
       <button
         type="button"
@@ -17,7 +17,7 @@ export function RunPanel({ canGenerate, isGenerating, onGenerate }: RunPanelProp
         disabled={!canGenerate}
         onClick={() => void onGenerate()}
       >
-        {isGenerating ? "Preparing..." : "Generate Report"}
+        {isGenerating ? "Generating..." : "Generate Report"}
       </button>
     </section>
   );

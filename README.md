@@ -33,6 +33,13 @@ cd github_pages_app
 npm run build
 ```
 
+## Tests
+
+```bash
+cd github_pages_app
+npm test
+```
+
 ## Deployment
 
 GitHub Actions builds `github_pages_app` and publishes the generated `dist` output to GitHub Pages.
